@@ -1,0 +1,118 @@
+import React, { useEffect, useRef, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { motion } from "framer-motion";
+
+const MAPS = [
+  { name: "Desert Base", color: "bg-yellow-200" },
+  { name: "Forest Arena", color: "bg-green-200" },
+  { name: "Ice Zone", color: "bg-cyan-100" },
+];
+
+const GUNS = [
+  { name: "Blaster", damage: 1, perk: "Fast fire" },
+  { name: "Sniper", damage: 1, perk: "Long range" },
+  { name: "Rocket", damage: 1, perk: "Splash effect" },
+];
+
+const SKINS = [
+  { name: "Ninja", perk: "Move faster" },
+  { name: "Tank", perk: "Extra defense" },
+  { name: "Scout", perk: "Faster reload" },
+];
+
+function randomItem(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+export default function ArenaShooter() {
+  const [mode, setMode] = useState("1vBot");
+  const [map, setMap] = useState(MAPS[0]);
+  const [playerHearts, setPlayerHearts] = useState(3);
+  const [botHearts, setBotHearts] = useState(3);
+  const [gun, setGun] = useState(null);
+  const [skin, setSkin] = useState(SKINS[0]);
+  const [message, setMessage] = useState("Search the map for a gun!");
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!gun && Math.random() > 0.6) {
+        const foundGun = randomItem(GUNS);
+        setGun(foundGun);
+        setMessage(`You found ${foundGun.name}! (${foundGun.perk})`);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [gun]);
+
+  function shootEnemy() {
+    if (!gun) {
+      setMessage("No gun yet! Keep exploring.");
+      return;
+    }
+
+    if (botHearts > 0) {
+      setBotHearts((h) => h - gun.damage);
+      setMessage(`You hit enemy with ${gun.name}!`);
+    }
+  }
+
+  useEffect(() => {
+    if (botHearts <= 0) {
+      setMessage("Victory! Enemy defeated.");
+      return;
+    }
+
+    const botAttack = setTimeout(() => {
+      if (Math.random() > 0.5 && playerHearts > 0) {
+        setPlayerHearts((h) => h - 1);
+        setMessage("Enemy shot you! Lost 1 heart.");
+      }
+    }, 1800);
+
+    return () => clearTimeout(botAttack);
+  }, [botHearts, playerHearts]);
+
+  useEffect(() => {
+    if (playerHearts <= 0) {
+      setMessage("Game Over! You lost.");
+    }
+  }, [playerHearts]);
+
+  return (
+    <div className={`min-h-screen p-6 ${map.color}`}>
+      <motion.h1
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="text-3xl font-bold mb-4"
+      >
+        2D Arena Shooter
+      </motion.h1>
+
+      <div className="flex gap-2 flex-wrap mb-4">
+        {['1vBot', '1v1', '2v2', '3v3'].map((m) => (
+          <Button key={m} onClick={() => setMode(m)}>{m}</Button>
+        ))}
+      </div>
+
+      <div className="flex gap-2 flex-wrap mb-4">
+        {MAPS.map((m) => (
+          <Button key={m.name} onClick={() => setMap(m)}>{m.name}</Button>
+        ))}
+      </div>
+
+      <Card className="rounded-2xl shadow-xl max-w-xl">
+        <CardContent className="p-4 space-y-3">
+          <p><strong>Mode:</strong> {mode}</p>
+          <p><strong>Skin:</strong> {skin.name} ({skin.perk})</p>
+          <p><strong>Gun:</strong> {gun ? `${gun.name} - ${gun.perk}` : 'None'}</p>
+          <p><strong>Your Hearts:</strong> {'❤️'.repeat(Math.max(playerHearts,0))}</p>
+          <p><strong>Enemy Hearts:</strong> {'❤️'.repeat(Math.max(botHearts,0))}</p>
+          <p>{message}</p>
+          <Button onClick={shootEnemy}>Shoot</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
