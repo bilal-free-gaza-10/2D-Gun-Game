@@ -1,84 +1,204 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 
 const MAPS = [
-  { name: "Desert Base", color: "bg-yellow-200" },
-  { name: "Forest Arena", color: "bg-green-200" },
-  { name: "Ice Zone", color: "bg-cyan-100" },
+  { name: "Desert Base", color: "bg-yellow-200", lootRate: 0.4, cover: 0.15 },
+  { name: "Forest Arena", color: "bg-green-200", lootRate: 0.55, cover: 0.25 },
+  { name: "Ice Zone", color: "bg-cyan-100", lootRate: 0.35, cover: 0.05 },
+  { name: "Neon City", color: "bg-purple-200", lootRate: 0.5, cover: 0.2 },
+  { name: "Lava Pit", color: "bg-red-200", lootRate: 0.3, cover: 0.1 },
 ];
 
 const GUNS = [
-  { name: "Blaster", damage: 1, perk: "Fast fire" },
-  { name: "Sniper", damage: 1, perk: "Long range" },
-  { name: "Rocket", damage: 1, perk: "Splash effect" },
+  {
+    name: "Blaster",
+    damage: 1,
+    cooldownMs: 900,
+    accuracyBonus: 0.1,
+    ability: "Fast burst fire",
+    description: "Reliable medium-range weapon.",
+  },
+  {
+    name: "Sniper",
+    damage: 2,
+    cooldownMs: 2000,
+    accuracyBonus: 0.3,
+    ability: "High precision critical shot",
+    description: "Slow but huge damage.",
+  },
+  {
+    name: "Rocket Launcher",
+    damage: 1,
+    cooldownMs: 2200,
+    accuracyBonus: -0.1,
+    splash: 0.35,
+    ability: "Splash damage",
+    description: "Can damage through cover.",
+  },
+  {
+    name: "SMG",
+    damage: 1,
+    cooldownMs: 600,
+    accuracyBonus: 0,
+    ability: "Rapid fire",
+    description: "Very fast weapon for close range.",
+  },
+  {
+    name: "Railgun",
+    damage: 3,
+    cooldownMs: 3200,
+    accuracyBonus: 0.25,
+    ability: "Armor piercing beam",
+    description: "Rare drop with massive burst.",
+  },
 ];
 
 const SKINS = [
-  { name: "Ninja", perk: "Move faster" },
-  { name: "Tank", perk: "Extra defense" },
-  { name: "Scout", perk: "Faster reload" },
+  { name: "Ninja", perk: "Move faster", dodgeBonus: 0.15, critBonus: 0 },
+  { name: "Tank", perk: "Extra defense", dodgeBonus: 0, damageReduction: 0.25 },
+  { name: "Scout", perk: "Faster reload", fireRateMultiplier: 0.8 },
+  { name: "Hunter", perk: "Better accuracy", accuracyBonus: 0.12 },
+  { name: "Vampire", perk: "Life steal chance", lifestealChance: 0.2 },
 ];
+
+const MODE_TEAM_SIZES = {
+  "1vBot": { myTeam: 1, enemyTeam: 1, onlineReady: false },
+  "1v1": { myTeam: 1, enemyTeam: 1, onlineReady: true },
+  "2v2": { myTeam: 2, enemyTeam: 2, onlineReady: true },
+  "3v3": { myTeam: 3, enemyTeam: 3, onlineReady: true },
+};
+
+const BASE_HEARTS = 3;
 
 function randomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
 export default function ArenaShooter() {
   const [mode, setMode] = useState("1vBot");
   const [map, setMap] = useState(MAPS[0]);
-  const [playerHearts, setPlayerHearts] = useState(3);
-  const [botHearts, setBotHearts] = useState(3);
-  const [gun, setGun] = useState(null);
   const [skin, setSkin] = useState(SKINS[0]);
-  const [message, setMessage] = useState("Search the map for a gun!");
+  const [inventory, setInventory] = useState([]);
+  const [equippedGun, setEquippedGun] = useState(null);
+  const [message, setMessage] = useState("Search the map to find your first gun.");
+  const [onlineEnabled, setOnlineEnabled] = useState(false);
+  const [lastShotAt, setLastShotAt] = useState(0);
+
+  const [myTeamHearts, setMyTeamHearts] = useState(BASE_HEARTS);
+  const [enemyTeamHearts, setEnemyTeamHearts] = useState(BASE_HEARTS);
+
+  const teamData = useMemo(() => MODE_TEAM_SIZES[mode], [mode]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!gun && Math.random() > 0.6) {
-        const foundGun = randomItem(GUNS);
-        setGun(foundGun);
-        setMessage(`You found ${foundGun.name}! (${foundGun.perk})`);
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [gun]);
-
-  function shootEnemy() {
-    if (!gun) {
-      setMessage("No gun yet! Keep exploring.");
-      return;
-    }
-
-    if (botHearts > 0) {
-      setBotHearts((h) => h - gun.damage);
-      setMessage(`You hit enemy with ${gun.name}!`);
-    }
-  }
+    setMyTeamHearts(teamData.myTeam * BASE_HEARTS);
+    setEnemyTeamHearts(teamData.enemyTeam * BASE_HEARTS);
+    setInventory([]);
+    setEquippedGun(null);
+    setMessage(`Mode switched to ${mode}. Explore ${map.name} and collect guns.`);
+  }, [mode, teamData, map.name]);
 
   useEffect(() => {
-    if (botHearts <= 0) {
-      setMessage("Victory! Enemy defeated.");
-      return;
-    }
-
-    const botAttack = setTimeout(() => {
-      if (Math.random() > 0.5 && playerHearts > 0) {
-        setPlayerHearts((h) => h - 1);
-        setMessage("Enemy shot you! Lost 1 heart.");
+    const lootTick = setInterval(() => {
+      const chance = Math.random();
+      if (chance < map.lootRate) {
+        const found = randomItem(GUNS);
+        setInventory((prev) => {
+          const next = [...prev, found];
+          if (!equippedGun) {
+            setEquippedGun(found);
+          }
+          return next;
+        });
+        setMessage(`You found ${found.name}! Ability: ${found.ability}.`);
       }
     }, 1800);
 
-    return () => clearTimeout(botAttack);
-  }, [botHearts, playerHearts]);
+    return () => clearInterval(lootTick);
+  }, [map, equippedGun]);
 
   useEffect(() => {
-    if (playerHearts <= 0) {
-      setMessage("Game Over! You lost.");
+    if (myTeamHearts <= 0) setMessage("Defeat! Your team lost all hearts.");
+    if (enemyTeamHearts <= 0) setMessage("Victory! Enemy team wiped out.");
+  }, [myTeamHearts, enemyTeamHearts]);
+
+  useEffect(() => {
+    if (myTeamHearts <= 0 || enemyTeamHearts <= 0) return;
+
+    const aiTick = setTimeout(() => {
+      const enemyAccuracy = 0.55;
+      const dodge = (skin.dodgeBonus || 0) + map.cover;
+      const gotHit = Math.random() < clamp(enemyAccuracy - dodge, 0.1, 0.9);
+      if (gotHit) {
+        const reduction = skin.damageReduction || 0;
+        const damageTaken = Math.random() < reduction ? 0 : 1;
+        if (damageTaken > 0) {
+          setMyTeamHearts((h) => Math.max(0, h - damageTaken));
+          setMessage("Enemy team landed a shot. You lost 1 heart.");
+        } else {
+          setMessage("Tank perk blocked incoming damage!");
+        }
+      }
+    }, 1500);
+
+    return () => clearTimeout(aiTick);
+  }, [myTeamHearts, enemyTeamHearts, skin, map.cover]);
+
+  function shootEnemy() {
+    if (!equippedGun) {
+      setMessage("No equipped gun. Keep exploring for loot drops.");
+      return;
     }
-  }, [playerHearts]);
+    if (enemyTeamHearts <= 0 || myTeamHearts <= 0) return;
+
+    const now = Date.now();
+    const fireRate = skin.fireRateMultiplier || 1;
+    const cooldown = equippedGun.cooldownMs * fireRate;
+    if (now - lastShotAt < cooldown) {
+      setMessage(`${equippedGun.name} is cooling down.`);
+      return;
+    }
+
+    setLastShotAt(now);
+
+    const baseAcc = 0.6;
+    const hitChance = clamp(
+      baseAcc +
+        (equippedGun.accuracyBonus || 0) +
+        (skin.accuracyBonus || 0) -
+        map.cover,
+      0.15,
+      0.95,
+    );
+
+    const isHit = Math.random() < hitChance;
+    if (!isHit) {
+      setMessage(`Missed with ${equippedGun.name}.`);
+      return;
+    }
+
+    const crit = Math.random() < 0.12 + (skin.critBonus || 0);
+    const totalDamage = equippedGun.damage + (crit ? 1 : 0);
+
+    setEnemyTeamHearts((h) => Math.max(0, h - totalDamage));
+
+    if (skin.lifestealChance && Math.random() < skin.lifestealChance) {
+      setMyTeamHearts((h) => h + 1);
+    }
+
+    setMessage(
+      `${equippedGun.name} hit for ${totalDamage} damage${crit ? " (CRIT)" : ""}.`,
+    );
+  }
+
+  const onlineStatus = onlineEnabled
+    ? "Online matchmaking enabled (placeholder networking state)."
+    : "Offline local simulation mode.";
 
   return (
     <div className={`min-h-screen p-6 ${map.color}`}>
@@ -87,28 +207,74 @@ export default function ArenaShooter() {
         animate={{ opacity: 1, y: 0 }}
         className="text-3xl font-bold mb-4"
       >
-        2D Arena Shooter
+        2D Arena Gun Game
       </motion.h1>
 
       <div className="flex gap-2 flex-wrap mb-4">
-        {['1vBot', '1v1', '2v2', '3v3'].map((m) => (
-          <Button key={m} onClick={() => setMode(m)}>{m}</Button>
+        {Object.keys(MODE_TEAM_SIZES).map((m) => (
+          <Button key={m} onClick={() => setMode(m)}>
+            {m}
+          </Button>
         ))}
       </div>
 
       <div className="flex gap-2 flex-wrap mb-4">
         {MAPS.map((m) => (
-          <Button key={m.name} onClick={() => setMap(m)}>{m.name}</Button>
+          <Button key={m.name} onClick={() => setMap(m)}>
+            {m.name}
+          </Button>
         ))}
       </div>
 
-      <Card className="rounded-2xl shadow-xl max-w-xl">
+      <div className="flex gap-2 flex-wrap mb-4">
+        {SKINS.map((s) => (
+          <Button key={s.name} onClick={() => setSkin(s)}>
+            {s.name}
+          </Button>
+        ))}
+        <Button onClick={() => setOnlineEnabled((v) => !v)}>
+          {onlineEnabled ? "Go Offline" : "Go Online"}
+        </Button>
+      </div>
+
+      <Card className="rounded-2xl shadow-xl max-w-2xl">
         <CardContent className="p-4 space-y-3">
-          <p><strong>Mode:</strong> {mode}</p>
-          <p><strong>Skin:</strong> {skin.name} ({skin.perk})</p>
-          <p><strong>Gun:</strong> {gun ? `${gun.name} - ${gun.perk}` : 'None'}</p>
-          <p><strong>Your Hearts:</strong> {'❤️'.repeat(Math.max(playerHearts,0))}</p>
-          <p><strong>Enemy Hearts:</strong> {'❤️'.repeat(Math.max(botHearts,0))}</p>
+          <p>
+            <strong>Mode:</strong> {mode} ({teamData.myTeam}v{teamData.enemyTeam})
+          </p>
+          <p>
+            <strong>Map:</strong> {map.name}
+          </p>
+          <p>
+            <strong>Skin:</strong> {skin.name} - {skin.perk}
+          </p>
+          <p>
+            <strong>Equipped Gun:</strong>{" "}
+            {equippedGun
+              ? `${equippedGun.name} (${equippedGun.ability})`
+              : "None"}
+          </p>
+          <p>
+            <strong>Inventory:</strong>{" "}
+            {inventory.length
+              ? inventory.map((g, i) => `${i + 1}. ${g.name}`).join(" | ")
+              : "No guns found yet"}
+          </p>
+          <p>
+            <strong>Your Team Hearts:</strong> {"❤️".repeat(Math.max(myTeamHearts, 0))}
+          </p>
+          <p>
+            <strong>Enemy Team Hearts:</strong> {"❤️".repeat(Math.max(enemyTeamHearts, 0))}
+          </p>
+          <p>
+            <strong>Network:</strong> {onlineStatus}
+          </p>
+          <p>
+            <strong>Mode Support:</strong>{" "}
+            {teamData.onlineReady
+              ? "Ready for online match flow"
+              : "Bot training mode only"}
+          </p>
           <p>{message}</p>
           <Button onClick={shootEnemy}>Shoot</Button>
         </CardContent>
